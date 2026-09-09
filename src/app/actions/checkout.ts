@@ -57,6 +57,10 @@ export async function createCheckoutSession(
       name: product.name,
       priceCents: product.priceCents,
       quantity: line.quantity,
+      // Not part of the Order schema (Mongoose drops unknown fields on
+      // .create()) — carried alongside just to build the Stripe line item
+      // below, so Stripe's hosted checkout page can show a thumbnail.
+      imageUrl: product.imageUrl,
     });
   }
 
@@ -82,7 +86,12 @@ export async function createCheckoutSession(
   // boundary: if any step fails, the reservation is released. Without
   // this, a DB blip on Order.create() would decrement stock permanently
   // with no order to ever release it.
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+  // Falls back to the deployed production URL, not localhost — a missing
+  // env var in production should still produce a working redirect target
+  // instead of silently sending Stripe's callback to an unreachable host.
+  const baseUrl =
+    process.env.NEXT_PUBLIC_BASE_URL ??
+    (process.env.NODE_ENV === "production" ? "https://atomic-cart-ashen.vercel.app" : "http://localhost:3000");
   let sessionUrl: string;
 
   try {
@@ -101,7 +110,13 @@ export async function createCheckoutSession(
         line_items: items.map((i) => ({
           price_data: {
             currency: "usd",
-            product_data: { name: i.name },
+            product_data: {
+              name: i.name,
+              // Stripe needs a publicly reachable HTTPS URL — fine for the
+              // seeded Unsplash images, but a locally-uploaded MinIO image
+              // (http://127.0.0.1:...) won't render on Stripe's hosted page.
+              images: i.imageUrl.startsWith("https://") ? [i.imageUrl] : undefined,
+            },
             unit_amount: i.priceCents,
           },
           quantity: i.quantity,
@@ -131,4 +146,43 @@ export async function createCheckoutSession(
   // control-flow exception that must NOT be caught and treated as a
   // checkout failure.
   redirect(sessionUrl);
+}
+
+/**
+ * Called when a user lands on /checkout/cancel. Without this, stock stays
+ * reserved for up to 24h (until Stripe's own session expiry fires the
+ * webhook) even though the customer has already visibly abandoned checkout
+ * — a real availability problem for low-stock items. Guarded by
+ * `status: "pending"` so it's a no-op for an already-paid or already-failed
+ * order, and safe to call on every render of the cancel page.
+ */
+export async function expireOrderAndReleaseStock(orderId: string): Promise<void> {
+  await connectToDatabase();
+
+  const order = await Order.findOne({ _id: orderId, status: "pending" });
+  if (!order) return;
+
+  if (order.stripeSessionId) {
+    try {
+      await stripe.checkout.sessions.expire(order.stripeSessionId);
+    } catch (err) {
+      // Already expired/completed on Stripe's side, or a transient API
+      // error — either way, the DB-side release below is what actually
+      // matters for inventory correctness.
+      console.error("stripe.checkout.sessions.expire failed (non-fatal):", err);
+    }
+  }
+
+  await releaseStock(
+    order.items.map((i: { productId: unknown; slug: string; quantity: number }) => ({
+      productId: String(i.productId),
+      slug: i.slug,
+      quantity: i.quantity,
+    }))
+  );
+
+  order.status = "failed";
+  order.stockReserved = false;
+  await order.save();
+  safeRevalidate();
 }
