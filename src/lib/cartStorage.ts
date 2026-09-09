@@ -1,6 +1,6 @@
 "use client";
 
-const CART_KEY = "nextshop_cart";
+const CART_KEY = "atomic-cart_cart";
 
 export type CartLine = { slug: string; quantity: number };
 

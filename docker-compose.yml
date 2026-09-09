@@ -1,3 +1,5 @@
+name: atomic-cart
+
 services:
   mongo:
     image: mongo:7

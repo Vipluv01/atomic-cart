@@ -1,4 +1,4 @@
-# NextShop
+# Atomic Cart
 
 A full-stack e-commerce demo (Next.js 16 App Router, TypeScript, MongoDB, Stripe, S3) built around the parts most e-commerce clones skip: **inventory correctness under concurrency, idempotent payment webhooks, and an explicit order state machine** — not just "connect Stripe and call it done."
 
