@@ -38,7 +38,7 @@ export async function buildCheckoutSession(
   customerEmail: string,
   clientIp: string
 ): Promise<CheckoutOutcome> {
-  if (isRateLimited(`checkout:${clientIp}`)) {
+  if (await isRateLimited(`checkout:${clientIp}`)) {
     return { error: "Too many checkout attempts. Try again in a minute.", status: 429 };
   }
 
