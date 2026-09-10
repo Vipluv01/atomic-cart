@@ -48,10 +48,21 @@ export async function GET() {
     checkS3Configured(),
   ];
 
-  const healthy = database === "connected" && stripeConfigured && s3Configured;
+  // Three tiers, not a single healthy/unhealthy boolean: DB and Stripe are
+  // required for the actual purchase path (browse, cart, checkout, pay) —
+  // either one being down means the site genuinely can't do its job, so
+  // that's "unhealthy" and a real 503. S3 only backs the admin
+  // image-upload feature; missing it doesn't stop a single customer from
+  // buying anything, so it's surfaced as "degraded" without flipping the
+  // whole deployment to a failing status. An uptime monitor alerting on
+  // every S3-misconfiguration the same way it alerts on "the database is
+  // down" would train whoever's watching it to ignore real alerts.
+  const criticalDown = database === "disconnected" || !stripeConfigured;
+  const status = criticalDown ? "unhealthy" : s3Configured ? "healthy" : "degraded";
+  const httpStatus = criticalDown ? 503 : 200;
 
   const body = {
-    status: healthy ? "healthy" : "degraded",
+    status,
     checks: {
       database,
       stripe: stripeConfigured ? "configured" : "not configured",
@@ -61,12 +72,12 @@ export async function GET() {
   };
 
   const durationMs = Math.round(performance.now() - start);
-  logger[healthy ? "info" : "warn"]("health check", {
+  logger[status === "healthy" ? "info" : "warn"]("health check", {
     path: "/api/health",
     method: "GET",
     durationMs,
     ...body.checks,
   });
 
-  return NextResponse.json(body, { status: healthy ? 200 : 503 });
+  return NextResponse.json(body, { status: httpStatus });
 }
