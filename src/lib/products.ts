@@ -9,6 +9,7 @@ export type ProductSummary = {
   priceCents: number;
   imageUrl: string;
   stock: number;
+  category: string;
 };
 
 function serialize(doc: Record<string, unknown>): ProductSummary {
@@ -19,6 +20,7 @@ function serialize(doc: Record<string, unknown>): ProductSummary {
     priceCents: doc.priceCents as number,
     imageUrl: doc.imageUrl as string,
     stock: doc.stock as number,
+    category: doc.category as string,
   };
 }
 

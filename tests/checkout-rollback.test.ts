@@ -58,6 +58,7 @@ describe("createCheckoutSession rollback", () => {
       priceCents: 1500,
       imageUrl: "https://example.com/x.png",
       stock: 3,
+      category: "Accessories",
     });
 
     let threw = false;

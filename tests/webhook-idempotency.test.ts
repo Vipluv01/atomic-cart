@@ -45,6 +45,7 @@ describe("Stripe webhook idempotency", () => {
       priceCents: 1000,
       imageUrl: "https://example.com/widget.png",
       stock: 5,
+      category: "Accessories",
     });
 
     const order = await Order.create({

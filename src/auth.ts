@@ -25,17 +25,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
 
-        return { id: user._id.toString(), email: user.email, name: user.name };
+        // `|| "user"` guards documents created before the role field
+        // existed — Mongoose applies schema defaults on hydration for
+        // genuinely missing fields, but this makes the safe value explicit
+        // rather than depending on that behavior.
+        return { id: user._id.toString(), email: user.email, name: user.name, role: user.role || "user" };
       },
     }),
   ],
   callbacks: {
     jwt: async ({ token, user }) => {
-      if (user) token.id = user.id;
+      if (user) {
+        token.id = user.id;
+        token.role = (user as { role?: "user" | "admin" }).role ?? "user";
+      }
       return token;
     },
     session: async ({ session, token }) => {
-      if (session.user) session.user.id = token.id as string;
+      if (session.user) {
+        session.user.id = token.id as string;
+        session.user.role = (token.role as "user" | "admin" | undefined) ?? "user";
+      }
       return session;
     },
   },

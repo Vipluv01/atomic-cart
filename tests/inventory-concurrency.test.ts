@@ -36,6 +36,7 @@ describe("reserveStock concurrency", () => {
       priceCents: 500,
       imageUrl: "https://example.com/x.png",
       stock: 1,
+      category: "Accessories",
     });
 
     const item = { productId: product._id.toString(), slug: product.slug, quantity: 1 };
@@ -67,6 +68,7 @@ describe("reserveStock concurrency", () => {
       priceCents: 500,
       imageUrl: "https://example.com/a.png",
       stock: 10,
+      category: "Accessories",
     });
     const outOfStock = await Product.create({
       slug: "out-of-stock",
@@ -75,6 +77,7 @@ describe("reserveStock concurrency", () => {
       priceCents: 500,
       imageUrl: "https://example.com/b.png",
       stock: 0,
+      category: "Accessories",
     });
 
     await expect(

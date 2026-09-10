@@ -2,18 +2,19 @@
 
 import { auth } from "@/auth";
 import { connectToDatabase } from "@/lib/db";
-import { Product } from "@/lib/models/Product";
+import { Product, type ProductCategory } from "@/lib/models/Product";
 import { createPresignedUploadUrl } from "@/lib/s3";
 import { revalidateProductCache } from "@/lib/revalidateProducts";
 
-async function requireSession() {
+async function requireAdminSession() {
   const session = await auth();
   if (!session?.user) throw new Error("Unauthorized");
+  if (session.user.role !== "admin") throw new Error("403 Forbidden: admin role required");
   return session;
 }
 
 export async function getUploadUrl(contentType: string) {
-  await requireSession();
+  await requireAdminSession();
   return createPresignedUploadUrl(contentType);
 }
 
@@ -24,8 +25,9 @@ export async function createProduct(input: {
   priceCents: number;
   stock: number;
   imageUrl: string;
+  category: ProductCategory;
 }): Promise<{ error: string } | { success: true }> {
-  await requireSession();
+  await requireAdminSession();
   await connectToDatabase();
 
   const existing = await Product.findOne({ slug: input.slug });

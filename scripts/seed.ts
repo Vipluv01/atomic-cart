@@ -10,6 +10,7 @@ const SAMPLE_PRODUCTS = [
     priceCents: 12999,
     imageUrl: "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=800&auto=format&fit=crop",
     stock: 15,
+    category: "Keyboards",
   },
   {
     slug: "wireless-mouse",
@@ -18,14 +19,16 @@ const SAMPLE_PRODUCTS = [
     priceCents: 4999,
     imageUrl: "https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?w=800&auto=format&fit=crop",
     stock: 24,
+    category: "Mice",
   },
   {
     slug: "usb-c-hub",
     name: "Atomic 7-in-1 Thunderbolt USB-C Dock",
     description: "Aluminum 7-in-1 hub featuring 4K 60Hz HDMI, dual SD card readers, and 100W Power Delivery.",
     priceCents: 6499,
-    imageUrl: "https://picsum.photos/seed/usb-c-hub/800/800",
+    imageUrl: "https://images.pexels.com/photos/20076003/pexels-photo-20076003.jpeg?w=800",
     stock: 8,
+    category: "Docks",
   },
   {
     slug: "desk-lamp",
@@ -34,6 +37,7 @@ const SAMPLE_PRODUCTS = [
     priceCents: 5499,
     imageUrl: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=800&auto=format&fit=crop",
     stock: 12,
+    category: "Accessories",
   },
   {
     slug: "studio-headphones",
@@ -42,14 +46,16 @@ const SAMPLE_PRODUCTS = [
     priceCents: 18999,
     imageUrl: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop",
     stock: 10,
+    category: "Audio",
   },
   {
     slug: "desk-mat",
     name: "Minimalist Felt Wool Desk Mat",
     description: "Premium anti-slip Merino wool felt desk pad designed for optimal mouse tracking and workspace aesthetics.",
     priceCents: 3499,
-    imageUrl: "https://picsum.photos/seed/desk-mat/800/800",
+    imageUrl: "https://images.unsplash.com/photo-1518118014377-ce94f3eae7af?w=800&auto=format&fit=crop",
     stock: 18,
+    category: "Accessories",
   },
   {
     slug: "wireless-charger",
@@ -58,6 +64,7 @@ const SAMPLE_PRODUCTS = [
     priceCents: 7999,
     imageUrl: "https://images.unsplash.com/photo-1615526675159-e248c3021d3f?w=800&auto=format&fit=crop",
     stock: 5,
+    category: "Accessories",
   },
   {
     slug: "ultrawide-monitor",
@@ -66,6 +73,7 @@ const SAMPLE_PRODUCTS = [
     priceCents: 59999,
     imageUrl: "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=800&auto=format&fit=crop",
     stock: 3,
+    category: "Monitors",
   },
 ];
 

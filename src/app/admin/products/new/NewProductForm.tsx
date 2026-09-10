@@ -3,13 +3,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { getUploadUrl, createProduct } from "@/app/actions/products";
+import { PRODUCT_CATEGORIES, type ProductCategory } from "@/lib/productCategories";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function NewProductForm() {
-  const [form, setForm] = useState({ slug: "", name: "", description: "", priceCents: 0, stock: 0 });
+  const [form, setForm] = useState({
+    slug: "",
+    name: "",
+    description: "",
+    priceCents: 0,
+    stock: 0,
+    category: PRODUCT_CATEGORIES[0] as ProductCategory,
+  });
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -109,6 +117,22 @@ export function NewProductForm() {
                 value={form.stock}
                 onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
               />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="category">Category</Label>
+              <select
+                id="category"
+                required
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value as ProductCategory })}
+                className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                {PRODUCT_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="image">Product image</Label>
