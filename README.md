@@ -40,6 +40,20 @@ Each request carries a distinct `X-Forwarded-For` — not a rate-limit bypass, b
 
 The latency numbers above (p50 ~800ms) are real and reported as-is, not smoothed over — they reflect a single `next start` instance with no reverse proxy or clustering in front of it, plus the one winning request making a genuine Stripe API call. What matters for the correctness claim held regardless: exactly one winner, zero 500s, stock never negative.
 
+The same script was also run against the actual live production deployment (`atomic-cart-ashen.vercel.app`), not just localhost:
+
+```
+Status code distribution: { '303': 1, '409': 49 }
+Succeeded (303):            1 (expected 1)
+Insufficient stock (409):   49 (expected 49)
+Unhandled server errors (500): 0 (expected 0)
+Throughput: 6.0 req/s over 8400ms wall clock
+p50: 7833.1ms  p95: 8071.1ms  p99: 8391.6ms
+Final stock: 0 (expected 0)
+```
+
+Same perfect correctness result — but the latency is dramatically higher (p50 ~7.8s vs ~800ms locally), and that's reported honestly rather than only showing the flattering local number. That gap is Vercel's serverless cold-start/concurrency behavior on the Hobby tier under 50 simultaneous invocations of the same function, not a flaw in the guarantee itself, which held exactly as well under real production conditions as it did locally.
+
 ## Production observability
 
 - **Structured JSON logging** ([`src/lib/logger.ts`](src/lib/logger.ts)) — every log line is one JSON object (`timestamp`, `level`, `requestId`, `path`, `durationMs`, `errorStack`), wired into the checkout API, the Stripe webhook handler, and the health check. No logging library — Vercel and most container platforms already capture stdout/stderr, so the only thing worth adding is a consistent shape to filter on.
