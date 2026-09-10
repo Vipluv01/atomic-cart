@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { readCart, cartItemCount, onCartUpdated } from "@/lib/cartStorage";
 import { Button } from "@/components/ui/button";
-import { ShoppingBag, Sparkles, User, LogOut, PlusCircle } from "lucide-react";
+import { ShoppingBag, Sparkles, User, LogOut, PlusCircle, Receipt, LayoutDashboard } from "lucide-react";
 
 export function Header() {
   const { data: session, status } = useSession();
@@ -45,10 +45,22 @@ export function Header() {
 
           {status === "authenticated" ? (
             <div className="flex items-center gap-4 border-l border-zinc-800 pl-4">
-              <Link href="/admin/products/new" className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 border border-indigo-500/30 px-3 py-1.5 rounded-lg">
-                <PlusCircle className="w-3.5 h-3.5" />
-                <span>New Product</span>
+              <Link href="/orders" className="flex items-center gap-1 hover:text-white transition-colors">
+                <Receipt className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Orders</span>
               </Link>
+              {session.user.role === "admin" && (
+                <>
+                  <Link href="/admin/orders" className="flex items-center gap-1 hover:text-white transition-colors">
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Admin Orders</span>
+                  </Link>
+                  <Link href="/admin/products/new" className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 border border-indigo-500/30 px-3 py-1.5 rounded-lg">
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>New Product</span>
+                  </Link>
+                </>
+              )}
               <div className="flex items-center gap-1.5 text-xs text-zinc-400">
                 <User className="w-3.5 h-3.5 text-zinc-500" />
                 <span className="max-w-[120px] truncate">{session.user.email}</span>

@@ -122,6 +122,11 @@ export async function createCheckoutSession(
           quantity: i.quantity,
         })),
         metadata: { orderId: order._id.toString() },
+        // Also stamped on the PaymentIntent itself, not just the session:
+        // payment_intent.payment_failed fires on the PaymentIntent object,
+        // which doesn't inherit the session's metadata automatically, so
+        // without this the webhook has no way to find the order.
+        payment_intent_data: { metadata: { orderId: order._id.toString() } },
         success_url: `${baseUrl}/checkout/success?orderId=${order._id.toString()}`,
         cancel_url: `${baseUrl}/checkout/cancel?orderId=${order._id.toString()}`,
         // Stripe expires an unpaid session automatically after 24h; the
