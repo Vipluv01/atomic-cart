@@ -18,6 +18,34 @@ The original version of this project was a standard tutorial-shaped build: Next.
 
 5. **Rate-limited checkout + real auth** — `createCheckoutSession` rate-limits by IP ([`src/lib/rateLimit.ts`](src/lib/rateLimit.ts)); accounts use NextAuth (Credentials provider, bcrypt-hashed passwords, JWT sessions).
 
+## HTTP-level load testing, not just the function
+
+[`tests/inventory-concurrency.test.ts`](tests/inventory-concurrency.test.ts) and [`scripts/benchmark-concurrency.ts`](scripts/benchmark-concurrency.ts) both call `reserveStock()` directly, in-process — real proof the atomic guard works, but not proof the actual HTTP request pipeline holds up under concurrent load. The web UI's checkout is a Next.js Server Action, which uses React's Flight wire protocol — not something a plain HTTP client can drive, so a genuine HTTP-level concurrency test needed a genuine HTTP endpoint.
+
+That's what `POST /api/checkout` ([`src/app/api/checkout/route.ts`](src/app/api/checkout/route.ts)) is: a real REST endpoint sharing the exact same business logic as the Server Action (both call `buildCheckoutSession()` in [`src/lib/checkoutCore.ts`](src/lib/checkoutCore.ts), extracted specifically so the two transports — form-based Server Action, plain REST — never duplicate the reservation/rollback logic between them.
+
+[`scripts/load-test-http.ts`](scripts/load-test-http.ts) fires 75 real concurrent HTTP requests at a running server, racing for one unit of stock:
+
+```
+Status code distribution: { '303': 1, '409': 74 }
+Succeeded (303):            1 (expected 1)
+Insufficient stock (409):   74 (expected 74)
+Unhandled server errors (500): 0 (expected 0)
+Throughput: 43.0 req/s over 1745ms wall clock
+p50: 807.8ms  p95: 1394.8ms  p99: 1723.1ms
+Final stock: 0 (expected 0)
+```
+
+Each request carries a distinct `X-Forwarded-For` — not a rate-limit bypass, but the realistic scenario: a flash-sale stampede is many different customers hitting the same item at once, not one client hammering the endpoint. Without distinct IPs, the existing per-IP rate limiter (a real anti-abuse feature) would reject most of the batch with 429 before ever reaching the stock check, testing the rate limiter instead of the concurrency guarantee.
+
+The latency numbers above (p50 ~800ms) are real and reported as-is, not smoothed over — they reflect a single `next start` instance with no reverse proxy or clustering in front of it, plus the one winning request making a genuine Stripe API call. What matters for the correctness claim held regardless: exactly one winner, zero 500s, stock never negative.
+
+## Production observability
+
+- **Structured JSON logging** ([`src/lib/logger.ts`](src/lib/logger.ts)) — every log line is one JSON object (`timestamp`, `level`, `requestId`, `path`, `durationMs`, `errorStack`), wired into the checkout API, the Stripe webhook handler, and the health check. No logging library — Vercel and most container platforms already capture stdout/stderr, so the only thing worth adding is a consistent shape to filter on.
+- **Health check** ([`src/app/api/health/route.ts`](src/app/api/health/route.ts)) — a real MongoDB ping (with a 3s timeout so a hanging DB can't hang the health check itself), plus Stripe/S3 *configuration* checks. Deliberately not live API calls to Stripe/S3: a health endpoint that might be polled every few seconds by an uptime monitor shouldn't be making a real external API request on every hit. Returns 200 when all three are healthy, 503 otherwise — verified by actually breaking each dependency and confirming the status code and per-check breakdown both flip correctly.
+- **Error boundaries** ([`src/app/error.tsx`](src/app/error.tsx), [`src/app/global-error.tsx`](src/app/global-error.tsx)) — this Next.js version (16.3+) stabilized a `retry()` prop replacing the older `reset()` pattern; verified against the actual installed version's docs rather than assumed from training data. `global-error.tsx` replaces the root layout entirely when it fires, which means it does **not** get `globals.css` — Tailwind classes silently don't render there, so it uses inline styles instead of the rest of the app's component library. Verified by deliberately throwing in a force-dynamic test route and confirming the response carries a real error digest and a genuine HTTP 500 (not a silent 200) — the actual rendered fallback UI itself needs a real browser to see, which wasn't available to check directly.
+
 ## A bug the tests actually caught
 
 The first version of `createCheckoutSession` called `revalidateProductCache()` and `Order.create()` *between* the stock-reservation try/catch and the Stripe-session try/catch, both outside any rollback boundary. Writing [`tests/checkout-rollback.test.ts`](tests/checkout-rollback.test.ts) — which forces a real Stripe API failure (an invalid key against the live Stripe API, not a mock) — caught it immediately: stock was reserved, then a failure in that gap left it decremented forever with no order ever created to release it. The fix wraps order creation and Stripe session creation in one rollback boundary, and makes cache revalidation swallow its own errors so a non-critical failure there can never abort the transaction. See the git history on `src/app/actions/checkout.ts` for the before/after.

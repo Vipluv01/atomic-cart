@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { expireOrderAndReleaseStock } from "@/app/actions/checkout";
+import { expireOrderAndReleaseStock } from "@/lib/checkoutCore";
 
 export default async function CheckoutCancelPage({
   searchParams,

@@ -5,6 +5,7 @@ import { WebhookEvent } from "@/lib/models/WebhookEvent";
 import { Order } from "@/lib/models/Order";
 import { releaseStock, type ReserveItem } from "@/lib/inventory";
 import { revalidateProductCache } from "@/lib/revalidateProducts";
+import { logger, newRequestId } from "@/lib/logger";
 import Stripe from "stripe";
 
 function toReserveItems(items: { productId: unknown; slug: string; quantity: number }[]): ReserveItem[] {
@@ -15,6 +16,9 @@ function toReserveItems(items: { productId: unknown; slug: string; quantity: num
 // is required here: Stripe's signature is computed over the exact raw
 // body bytes, so the body must be read as text before any JSON parsing.
 export async function POST(request: NextRequest) {
+  const requestId = newRequestId();
+  const start = performance.now();
+
   const signature = request.headers.get("stripe-signature");
   const rawBody = await request.text();
 
@@ -26,118 +30,136 @@ export async function POST(request: NextRequest) {
   try {
     event = stripe.webhooks.constructEvent(rawBody, signature, process.env.STRIPE_WEBHOOK_SECRET!);
   } catch (err) {
+    logger.warn("Webhook signature verification failed", { requestId, path: "/api/webhooks/stripe" });
     return NextResponse.json({ error: `Invalid signature: ${(err as Error).message}` }, { status: 400 });
   }
 
-  await connectToDatabase();
-
-  // Idempotency: the unique index on eventId means only one process can
-  // ever successfully insert a given event.id. A duplicate delivery hits
-  // the duplicate-key error and is treated as an intentional, expected
-  // no-op — not a failure — so Stripe still gets a 200 and won't retry.
   try {
-    await WebhookEvent.create({ eventId: event.id, type: event.type });
-  } catch (err) {
-    const isDuplicateKey = (err as { code?: number }).code === 11000;
-    if (isDuplicateKey) {
-      return NextResponse.json({ received: true, deduped: true });
+    await connectToDatabase();
+
+    // Idempotency: the unique index on eventId means only one process can
+    // ever successfully insert a given event.id. A duplicate delivery hits
+    // the duplicate-key error and is treated as an intentional, expected
+    // no-op — not a failure — so Stripe still gets a 200 and won't retry.
+    try {
+      await WebhookEvent.create({ eventId: event.id, type: event.type });
+    } catch (err) {
+      const isDuplicateKey = (err as { code?: number }).code === 11000;
+      if (isDuplicateKey) {
+        logger.info("Webhook deduped", { requestId, path: "/api/webhooks/stripe", eventType: event.type });
+        return NextResponse.json({ received: true, deduped: true });
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = session.metadata?.orderId;
-      if (orderId) {
-        const paymentIntentId =
-          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const orderId = session.metadata?.orderId;
+        if (orderId) {
+          const paymentIntentId =
+            typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
 
-        // The webhook payload doesn't include the charge's receipt_url, so
-        // it's fetched with one follow-up API call rather than left unset —
-        // this is what lets a customer's order history link to their real
-        // Stripe receipt instead of requiring a dashboard login.
-        let receiptUrl: string | undefined;
-        if (paymentIntentId) {
-          try {
-            const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
-              expand: ["latest_charge"],
-            });
-            const charge = paymentIntent.latest_charge;
-            receiptUrl = typeof charge === "object" && charge ? (charge.receipt_url ?? undefined) : undefined;
-          } catch (err) {
-            console.error("Failed to fetch receipt_url (non-fatal):", err);
+          // The webhook payload doesn't include the charge's receipt_url, so
+          // it's fetched with one follow-up API call rather than left unset —
+          // this is what lets a customer's order history link to their real
+          // Stripe receipt instead of requiring a dashboard login.
+          let receiptUrl: string | undefined;
+          if (paymentIntentId) {
+            try {
+              const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+                expand: ["latest_charge"],
+              });
+              const charge = paymentIntent.latest_charge;
+              receiptUrl = typeof charge === "object" && charge ? (charge.receipt_url ?? undefined) : undefined;
+            } catch (err) {
+              logger.warn("Failed to fetch receipt_url (non-fatal)", {
+                requestId,
+                errorStack: err instanceof Error ? err.stack : String(err),
+              });
+            }
+          }
+
+          // Guard on status==='pending' so a redelivered event (should be
+          // caught by the eventId check above already, but defense in depth)
+          // can never move a 'failed'/already-'paid' order backward.
+          await Order.updateOne(
+            { _id: orderId, status: "pending" },
+            { $set: { status: "paid", paymentIntentId, receiptUrl } }
+          );
+        }
+        break;
+      }
+
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const orderId = session.metadata?.orderId;
+        if (orderId) {
+          const order = await Order.findOne({ _id: orderId, status: "pending" });
+          if (order) {
+            await releaseStock(toReserveItems(order.items));
+            order.status = "failed";
+            order.stockReserved = false;
+            await order.save();
+            revalidateProductCache();
           }
         }
-
-        // Guard on status==='pending' so a redelivered event (should be
-        // caught by the eventId check above already, but defense in depth)
-        // can never move a 'failed'/already-'paid' order backward.
-        await Order.updateOne(
-          { _id: orderId, status: "pending" },
-          { $set: { status: "paid", paymentIntentId, receiptUrl } }
-        );
+        break;
       }
-      break;
-    }
 
-    case "checkout.session.expired": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const orderId = session.metadata?.orderId;
-      if (orderId) {
-        const order = await Order.findOne({ _id: orderId, status: "pending" });
-        if (order) {
-          await releaseStock(toReserveItems(order.items));
-          order.status = "failed";
-          order.stockReserved = false;
-          await order.save();
-          revalidateProductCache();
+      case "payment_intent.payment_failed": {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        const orderId = paymentIntent.metadata?.orderId;
+        if (orderId) {
+          const order = await Order.findOne({ _id: orderId, status: "pending" });
+          if (order) {
+            await releaseStock(toReserveItems(order.items));
+            order.status = "failed";
+            order.stockReserved = false;
+            order.paymentIntentId = paymentIntent.id;
+            await order.save();
+            revalidateProductCache();
+          }
         }
+        break;
       }
-      break;
-    }
 
-    case "payment_intent.payment_failed": {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      const orderId = paymentIntent.metadata?.orderId;
-      if (orderId) {
-        const order = await Order.findOne({ _id: orderId, status: "pending" });
-        if (order) {
-          await releaseStock(toReserveItems(order.items));
-          order.status = "failed";
-          order.stockReserved = false;
-          order.paymentIntentId = paymentIntent.id;
-          await order.save();
-          revalidateProductCache();
+      case "charge.refunded": {
+        const charge = event.data.object as Stripe.Charge;
+        const paymentIntentId =
+          typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+        if (paymentIntentId) {
+          // Only orders still holding stock get it released — a refund
+          // delivered twice (Stripe redelivery) is already blocked by the
+          // eventId uniqueness check above, but this guard means a refund on
+          // an order this webhook already processed is a clean no-op too.
+          const order = await Order.findOne({ paymentIntentId, stockReserved: true });
+          if (order) {
+            await releaseStock(toReserveItems(order.items));
+            order.status = "refunded";
+            order.stockReserved = false;
+            await order.save();
+            revalidateProductCache();
+          }
         }
+        break;
       }
-      break;
+
+      default:
+        break;
     }
 
-    case "charge.refunded": {
-      const charge = event.data.object as Stripe.Charge;
-      const paymentIntentId =
-        typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
-      if (paymentIntentId) {
-        // Only orders still holding stock get it released — a refund
-        // delivered twice (Stripe redelivery) is already blocked by the
-        // eventId uniqueness check above, but this guard means a refund on
-        // an order this webhook already processed is a clean no-op too.
-        const order = await Order.findOne({ paymentIntentId, stockReserved: true });
-        if (order) {
-          await releaseStock(toReserveItems(order.items));
-          order.status = "refunded";
-          order.stockReserved = false;
-          await order.save();
-          revalidateProductCache();
-        }
-      }
-      break;
-    }
-
-    default:
-      break;
+    const durationMs = Math.round(performance.now() - start);
+    logger.info("Webhook processed", { requestId, path: "/api/webhooks/stripe", eventType: event.type, durationMs });
+    return NextResponse.json({ received: true });
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - start);
+    logger.error("Webhook processing failed", err, {
+      requestId,
+      path: "/api/webhooks/stripe",
+      eventType: event.type,
+      durationMs,
+    });
+    return NextResponse.json({ error: "Internal error.", requestId }, { status: 500 });
   }
-
-  return NextResponse.json({ received: true });
 }
